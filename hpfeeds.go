@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 )
 
 type Hpfeeds struct {
@@ -50,6 +51,8 @@ func (hp *Hpfeeds) Connect() {
 
 	hp.conn = conn
 	hp.authenticate()
+	fmt.Println("Connected!")
+	go hp.readLoop()
 }
 
 func (hp *Hpfeeds) Close() {
@@ -64,25 +67,41 @@ func (hp *Hpfeeds) authenticate() {
 	}
 
 	name := hp.readString(0)
-	fmt.Println("name:", name)
-
 	nonce := make([]byte, int(hdr.Length)-(4+1)-(1+len(name)))
 	hp.readData(&nonce)
-	fmt.Println("nonce:", nonce)
-	hp.sendAuth(nonce, hp.ident, hp.auth)
-	fmt.Println("auth done")
-
-	hp.readLoop()
+	hp.sendMsgAuth(nonce)
 }
 
 func (hp *Hpfeeds) readLoop() {
 	for {
 		hdr := hp.readHeader()
+		
+		fmt.Println("hdr =", hdr)
+		// break on error
 		switch hdr.Opcode {
 		case OPCODE_ERR:
-			fmt.Println(hp.readString(uint8(hdr.Length - 5)))
+			hp.handleError(hdr)
+		case OPCODE_PUB:
+			hp.handlePub(hdr)
+		default:
+			hp.handleUnknown(hdr)
 		}
 	}
+}
+
+func (hp *Hpfeeds) handleError(hdr msgHeader) {
+	fmt.Println(hp.readString(uint8(hdr.Length - 5)))
+}
+
+func (hp *Hpfeeds) handlePub(hdr msgHeader) {
+	name := hp.readString(0)
+	channel := hp.readString(0)
+	payload := hp.readString(uint8(int(hdr.Length) - (4+1) - (1+len(name)) - (1+len(channel))))
+	fmt.Println("pub:", name, channel, payload)
+}
+
+func (hp *Hpfeeds) handleUnknown(hdr msgHeader) {
+	fmt.Println("Unknown message type in header", hdr)
 }
 
 func (hp *Hpfeeds) readData(data interface{}) {
@@ -90,7 +109,6 @@ func (hp *Hpfeeds) readData(data interface{}) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("readData(): ", data)
 }
 
 func (hp *Hpfeeds) readHeader() msgHeader {
@@ -116,29 +134,42 @@ func (hp *Hpfeeds) readString(length uint8) string {
 
 func (hp *Hpfeeds) sendMsg(opcode uint8, payload []byte) {
 	binary.Write(hp.conn, binary.BigEndian, msgHeader{uint32(5 + len(payload)), opcode})
-	fmt.Println("sendMsg()", payload)
+//	fmt.Println("sendMsg()", payload)
 	hp.conn.Write(payload)
 }
 
-func (hp *Hpfeeds) sendAuth(nonce []byte, ident string, auth string) {
+func (hp *Hpfeeds) sendMsgAuth(nonce []byte) {
 	mac := sha1.New()
 	mac.Write(nonce)
-	io.WriteString(mac, auth)
+	io.WriteString(mac, hp.auth)
 
 	buf := new(bytes.Buffer)
-	fmt.Println("ident =", ident)
-	err := binary.Write(buf, binary.BigEndian, uint8(len(ident)))
+	err := binary.Write(buf, binary.BigEndian, uint8(len(hp.ident)))
 	if err != nil {
 		fmt.Println("binary.Write failed:", err)
 	}
-	io.WriteString(buf, ident)
-	fmt.Println("mac =", mac.Sum(nil))
+	io.WriteString(buf, hp.ident)
 	buf.Write(mac.Sum(nil))
 	hp.sendMsg(OPCODE_AUTH, buf.Bytes())
 }
 
+func (hp *Hpfeeds) sendMsgSub(channel string) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.BigEndian, uint8(len(hp.ident)))
+	if err != nil {
+		fmt.Println("binary.Write failed:", err)
+	}
+	io.WriteString(buf, hp.ident)
+	io.WriteString(buf, channel)
+	hp.sendMsg(OPCODE_SUB, buf.Bytes())
+}
+
 func main() {
-	fmt.Println(os.Args)
-	hp := NewHpfeeds("hpfriends.honeycloud.net", 10000, os.Args[1], os.Args[2])
+	hp := NewHpfeeds("hpfriends.honeycloud.net", 20000, os.Args[1], os.Args[2])
 	hp.Connect()
+	hp.sendMsgSub(os.Args[3])
+
+	for {
+		time.Sleep(time.Second)
+	}
 }
