@@ -50,91 +50,74 @@ func (hp *Hpfeeds) Connect() {
 	}
 
 	hp.conn = conn
-	hp.authenticate()
 	fmt.Println("Connected!")
-	go hp.readLoop()
+	go hp.recvLoop()
+	// wait until authenticated
 }
 
 func (hp *Hpfeeds) Close() {
 	hp.Close()
 }
 
-func (hp *Hpfeeds) authenticate() {
-	hdr := hp.readHeader()
-
-	if hdr.Opcode != OPCODE_INFO {
-		panic(fmt.Sprintln("Unexpected opcode", hdr.Opcode))
-	}
-
-	name := hp.readString(0)
-	nonce := make([]byte, int(hdr.Length)-(4+1)-(1+len(name)))
-	hp.readData(&nonce)
-	hp.sendMsgAuth(nonce)
-}
-
-func (hp *Hpfeeds) readLoop() {
+func (hp *Hpfeeds) recvLoop() {
+	buf := []byte{}
 	for {
-		hdr := hp.readHeader()
-		
-		fmt.Println("hdr =", hdr)
-		// break on error
-		switch hdr.Opcode {
-		case OPCODE_ERR:
-			hp.handleError(hdr)
-		case OPCODE_PUB:
-			hp.handlePub(hdr)
-		default:
-			hp.handleUnknown(hdr)
+		readbuf := make([]byte, 1024)
+		n, err := hp.conn.Read(readbuf)
+
+		if err != nil {
+			panic(err)
+		}
+
+		buf = append(buf, readbuf[:n]...)
+
+		for len(buf) > 5 {
+			hdr := msgHeader{}
+			binary.Read(bytes.NewReader(buf[0:5]), binary.BigEndian, &hdr)
+			if len(buf) < int(hdr.Length) {
+				break
+			}
+			data := buf[5:]
+			buf = buf[int(hdr.Length):]
+			hp.parseMessage(hdr.Opcode, data)
 		}
 	}
 }
 
-func (hp *Hpfeeds) handleError(hdr msgHeader) {
-	fmt.Println(hp.readString(uint8(hdr.Length - 5)))
-}
-
-func (hp *Hpfeeds) handlePub(hdr msgHeader) {
-	name := hp.readString(0)
-	channel := hp.readString(0)
-	payload := hp.readString(uint8(int(hdr.Length) - (4+1) - (1+len(name)) - (1+len(channel))))
-	fmt.Println("pub:", name, channel, payload)
-}
-
-func (hp *Hpfeeds) handleUnknown(hdr msgHeader) {
-	fmt.Println("Unknown message type in header", hdr)
-}
-
-func (hp *Hpfeeds) readData(data interface{}) {
-	err := binary.Read(hp.conn, binary.BigEndian, data)
-	if err != nil {
-		panic(err)
+func (hp *Hpfeeds) parseMessage(opcode uint8, data []byte) {
+	switch opcode {
+	case OPCODE_INFO:
+		hp.sendMsgAuth(data[(1 + uint8(data[0])):])
+	case OPCODE_ERR:
+		hp.handleError(data)
+	case OPCODE_PUB:
+		len1 := uint8(data[0])
+		name := string(data[1:(1 + len1)])
+		len2 := uint8(data[1+len1])
+		channel := string(data[(1 + len1 + 1):(1 + len1 + 1 + len2)])
+		payload := data[1+len1+1+len2:]
+		hp.handlePub(name, channel, payload)
+	default:
+		hp.handleUnknown(opcode, data)
 	}
 }
 
-func (hp *Hpfeeds) readHeader() msgHeader {
-	hdr := msgHeader{}
-	hp.readData(&hdr)
-	return hdr
+func (hp *Hpfeeds) handleError(data []byte) {
+	// TODO
+	fmt.Println(string(data))
 }
 
-func (hp *Hpfeeds) readString(length uint8) string {
+func (hp *Hpfeeds) handlePub(name string, channel string, payload []byte) {
+	fmt.Println("pub:", name, channel, string(payload))
+}
 
-	if length == 0 {
-		hp.readData(&length)
-	}
-
-	if length == 0 {
-		// return err
-	}
-
-	buf := make([]byte, length)
-	hp.readData(&buf)
-	return string(buf)
+func (hp *Hpfeeds) handleUnknown(opcode uint8, data []byte) {
+	// TODO
+	fmt.Println("Unknown message type", opcode, data)
 }
 
 func (hp *Hpfeeds) sendMsg(opcode uint8, payload []byte) {
 	binary.Write(hp.conn, binary.BigEndian, msgHeader{uint32(5 + len(payload)), opcode})
-//	fmt.Println("sendMsg()", payload)
 	hp.conn.Write(payload)
 }
 
@@ -164,9 +147,30 @@ func (hp *Hpfeeds) sendMsgSub(channel string) {
 	hp.sendMsg(OPCODE_SUB, buf.Bytes())
 }
 
+func (hp *Hpfeeds) sendMsgPub() {
+	// TODO
+}
+
+func (hp *Hpfeeds) Subscribe() {
+	// TODO
+}
+
+func (hp *Hpfeeds) Publish() {
+	// TODO
+}
+
+func (hp *Hpfeeds) SubscribeJSON() {
+	// TODO
+}
+
+func (hp *Hpfeds) PublishJSON() {
+	// TODO
+}
+
 func main() {
 	hp := NewHpfeeds("hpfriends.honeycloud.net", 20000, os.Args[1], os.Args[2])
 	hp.Connect()
+	time.Sleep(time.Second)
 	hp.sendMsgSub(os.Args[3])
 
 	for {
