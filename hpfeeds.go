@@ -8,8 +8,8 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"net"
 	"log"
+	"net"
 )
 
 // Message describes the format of hpfeeds messages, where Name represents the
@@ -90,8 +90,8 @@ func (hp *Hpfeeds) Connect() error {
 
 func (hp *Hpfeeds) clearDisconnected() {
 	select {
-		case <- hp.Disconnected:
-		default:
+	case <-hp.Disconnected:
+	default:
 	}
 }
 
@@ -127,7 +127,8 @@ func (hp *Hpfeeds) recvLoop() {
 
 		for len(buf) > 5 {
 			hdr := rawMsgHeader{}
-			binary.Read(bytes.NewReader(buf[0:5]), binary.BigEndian, &hdr)
+			hdr.Length = binary.BigEndian.Uint32(buf[0:4])
+			hdr.Opcode = uint8(buf[4])
 			if len(buf) < int(hdr.Length) {
 				break
 			}
@@ -153,7 +154,7 @@ func (hp *Hpfeeds) parse(opcode uint8, data []byte) {
 		payload := data[1+len1+1+len2:]
 		hp.handlePub(name, channel, payload)
 	default:
-		hp.log("Received message with unknown type %d", opcode)
+		hp.log("Received message with unknown type %d\n", opcode)
 	}
 }
 

@@ -27,7 +27,7 @@ func main() {
 	hp.Publish("flotest", channel1)
 	go func() {
 		for {
-			channel1 <- []byte(fmt.Sprintf("Something"))
+			channel1 <- []byte("Something")
 			time.Sleep(time.Second)
 		}
 	}()
@@ -42,5 +42,5 @@ func main() {
 	}()
 
 	// Wait for disconnect
-	<- hp.Disconnected
+	<-hp.Disconnected
 }
