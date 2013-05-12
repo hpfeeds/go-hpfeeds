@@ -132,7 +132,7 @@ func (hp *Hpfeeds) recvLoop() {
 			if len(buf) < int(hdr.Length) {
 				break
 			}
-			data := buf[5:]
+			data := buf[5:int(hdr.Length)]
 			hp.parse(hdr.Opcode, data)
 			buf = buf[int(hdr.Length):]
 		}
