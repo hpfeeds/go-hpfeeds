@@ -173,18 +173,18 @@ func writeField(buf *bytes.Buffer, data []byte) {
 }
 
 func (hp *Hpfeeds) sendRawMsg(opcode uint8, data []byte) {
-	err := binary.Write(hp.conn, binary.BigEndian, rawMsgHeader{uint32(5 + len(data)), opcode})
-	if err != nil {
-		hp.log("Write(): %s\n", err)
-		hp.close(err)
-		return
-	}
-
-	_, err = hp.conn.Write(data)
-	if err != nil {
-		hp.log("Write(): %s\n", err)
-		hp.close(err)
-		return
+	buf := make([]byte, 5)
+	binary.BigEndian.PutUint32(buf, uint32(5+len(data)))
+	buf[4] = byte(opcode)
+	buf = append(buf, data...)
+	for len(buf) > 0 {
+		n, err := hp.conn.Write(buf)
+		if err != nil {
+			hp.log("Write(): %s\n", err)
+			hp.close(err)
+			return
+		}
+		buf = buf[n:]
 	}
 }
 

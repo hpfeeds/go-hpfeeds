@@ -17,8 +17,7 @@ BSD
 
 TODO
 ----
-* Test if everything actually works as intended, maybe write some unit tests 
-* See if it's necessary to use more buffering for ```sendRawMsg()```
-* Implement wrapper for JSON channels
 * Write command line interface
-* Add some sanity checks for message field length values
+* Test if everything actually works as intended, maybe write some unit tests 
+* Implement wrapper for JSON channels
+* Add some sanity checks for message field length values, in case server sends incorrect stuff
