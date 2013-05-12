@@ -1,4 +1,4 @@
-package main
+package hpfeeds
 
 import (
 	"bytes"
@@ -7,20 +7,28 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"time"
 )
 
 type Hpfeeds struct {
-	conn      *net.TCPConn
-	host      string
-	port      int
-	ident     string
-	auth      string
 	LocalAddr net.TCPAddr
+
+	conn  *net.TCPConn
+	host  string
+	port  int
+	ident string
+	auth  string
+
+	authSent chan bool
+
+	channel map[string]chan Message
 }
 
-type msgHeader struct {
+type Message struct {
+	Name string
+	Data []byte
+}
+
+type rawMsgHeader struct {
 	Length uint32
 	Opcode uint8
 }
@@ -34,7 +42,15 @@ const (
 )
 
 func NewHpfeeds(host string, port int, ident string, auth string) Hpfeeds {
-	return Hpfeeds{host: host, port: port, ident: ident, auth: auth}
+	return Hpfeeds{
+		host:  host,
+		port:  port,
+		ident: ident,
+		auth:  auth,
+
+		authSent: make(chan bool),
+		channel:  make(map[string]chan Message),
+	}
 }
 
 func (hp *Hpfeeds) Connect() {
@@ -50,9 +66,9 @@ func (hp *Hpfeeds) Connect() {
 	}
 
 	hp.conn = conn
-	fmt.Println("Connected!")
 	go hp.recvLoop()
-	// wait until authenticated
+	<-hp.authSent
+	fmt.Println("Connected!")
 }
 
 func (hp *Hpfeeds) Close() {
@@ -72,22 +88,23 @@ func (hp *Hpfeeds) recvLoop() {
 		buf = append(buf, readbuf[:n]...)
 
 		for len(buf) > 5 {
-			hdr := msgHeader{}
+			hdr := rawMsgHeader{}
 			binary.Read(bytes.NewReader(buf[0:5]), binary.BigEndian, &hdr)
 			if len(buf) < int(hdr.Length) {
 				break
 			}
 			data := buf[5:]
 			buf = buf[int(hdr.Length):]
-			hp.parseMessage(hdr.Opcode, data)
+			hp.parsePayload(hdr.Opcode, data)
 		}
 	}
 }
 
-func (hp *Hpfeeds) parseMessage(opcode uint8, data []byte) {
+func (hp *Hpfeeds) parsePayload(opcode uint8, data []byte) {
 	switch opcode {
 	case OPCODE_INFO:
-		hp.sendMsgAuth(data[(1 + uint8(data[0])):])
+		hp.sendAuth(data[(1 + uint8(data[0])):])
+		hp.authSent <- true
 	case OPCODE_ERR:
 		hp.handleError(data)
 	case OPCODE_PUB:
@@ -104,11 +121,16 @@ func (hp *Hpfeeds) parseMessage(opcode uint8, data []byte) {
 
 func (hp *Hpfeeds) handleError(data []byte) {
 	// TODO
-	fmt.Println(string(data))
+	fmt.Println("error", string(data))
 }
 
-func (hp *Hpfeeds) handlePub(name string, channel string, payload []byte) {
-	fmt.Println("pub:", name, channel, string(payload))
+func (hp *Hpfeeds) handlePub(name string, channelName string, payload []byte) {
+	channel, ok := hp.channel[channelName]
+	if !ok {
+		fmt.Println("Channel not subscribed.")
+		return
+	}
+	channel <- Message{name, payload}
 }
 
 func (hp *Hpfeeds) handleUnknown(opcode uint8, data []byte) {
@@ -116,12 +138,12 @@ func (hp *Hpfeeds) handleUnknown(opcode uint8, data []byte) {
 	fmt.Println("Unknown message type", opcode, data)
 }
 
-func (hp *Hpfeeds) sendMsg(opcode uint8, payload []byte) {
-	binary.Write(hp.conn, binary.BigEndian, msgHeader{uint32(5 + len(payload)), opcode})
+func (hp *Hpfeeds) sendRawMsg(opcode uint8, payload []byte) {
+	binary.Write(hp.conn, binary.BigEndian, rawMsgHeader{uint32(5 + len(payload)), opcode})
 	hp.conn.Write(payload)
 }
 
-func (hp *Hpfeeds) sendMsgAuth(nonce []byte) {
+func (hp *Hpfeeds) sendAuth(nonce []byte) {
 	mac := sha1.New()
 	mac.Write(nonce)
 	io.WriteString(mac, hp.auth)
@@ -133,10 +155,10 @@ func (hp *Hpfeeds) sendMsgAuth(nonce []byte) {
 	}
 	io.WriteString(buf, hp.ident)
 	buf.Write(mac.Sum(nil))
-	hp.sendMsg(OPCODE_AUTH, buf.Bytes())
+	hp.sendRawMsg(OPCODE_AUTH, buf.Bytes())
 }
 
-func (hp *Hpfeeds) sendMsgSub(channel string) {
+func (hp *Hpfeeds) sendSub(channel string) {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, uint8(len(hp.ident)))
 	if err != nil {
@@ -144,36 +166,22 @@ func (hp *Hpfeeds) sendMsgSub(channel string) {
 	}
 	io.WriteString(buf, hp.ident)
 	io.WriteString(buf, channel)
-	hp.sendMsg(OPCODE_SUB, buf.Bytes())
+	hp.sendRawMsg(OPCODE_SUB, buf.Bytes())
 }
 
-func (hp *Hpfeeds) sendMsgPub() {
+func (hp *Hpfeeds) sendPub() {
 	// TODO
 }
 
-func (hp *Hpfeeds) Subscribe() {
-	// TODO
+func (hp *Hpfeeds) Subscribe(channelName string, channel chan Message) {
+	hp.channel[channelName] = channel
+	hp.sendSub(channelName)
 }
 
-func (hp *Hpfeeds) Publish() {
-	// TODO
+func (hp *Hpfeeds) Unsubscribe(channelName string) {
+	delete(hp.channel, channelName)
 }
 
-func (hp *Hpfeeds) SubscribeJSON() {
+func (hp *Hpfeeds) Publish(channelName string, channel chan []byte) {
 	// TODO
-}
-
-func (hp *Hpfeds) PublishJSON() {
-	// TODO
-}
-
-func main() {
-	hp := NewHpfeeds("hpfriends.honeycloud.net", 20000, os.Args[1], os.Args[2])
-	hp.Connect()
-	time.Sleep(time.Second)
-	hp.sendMsgSub(os.Args[3])
-
-	for {
-		time.Sleep(time.Second)
-	}
 }
