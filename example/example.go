@@ -16,10 +16,21 @@ func main() {
 	hp := hpfeeds.NewHpfeeds(host, port, ident, auth)
 	hp.Connect()
 
-	channel := make(chan hpfeeds.Message)
-	hp.Subscribe(os.Args[3], channel)
+	// Publish something on "flotest" every second
+	channel1 := make(chan []byte)
+	hp.Publish("flotest", channel1)
+	go func() {
+		for {
+			time.Sleep(time.Second)
+			channel1 <- []byte(fmt.Sprintf("Something"))
+		}
+	}()
+
+	// Subscribe to "flotest" and print everything coming in on it
+	channel2 := make(chan hpfeeds.Message)
+	hp.Subscribe("flotest", channel2)
 	for {
-		foo := <-channel
+		foo := <-channel2
 		fmt.Println(foo.Name, string(foo.Data))
 	}
 }

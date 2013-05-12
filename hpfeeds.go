@@ -5,23 +5,8 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 )
-
-type Hpfeeds struct {
-	LocalAddr net.TCPAddr
-
-	conn  *net.TCPConn
-	host  string
-	port  int
-	ident string
-	auth  string
-
-	authSent chan bool
-
-	channel map[string]chan Message
-}
 
 type Message struct {
 	Name string
@@ -41,6 +26,21 @@ const (
 	OPCODE_SUB  = 4
 )
 
+type Hpfeeds struct {
+	LocalAddr net.TCPAddr
+
+	conn  *net.TCPConn
+	host  string
+	port  int
+	ident string
+	auth  string
+
+	authSent     chan bool
+	disconnected chan bool
+
+	channel map[string]chan Message
+}
+
 func NewHpfeeds(host string, port int, ident string, auth string) Hpfeeds {
 	return Hpfeeds{
 		host:  host,
@@ -48,8 +48,10 @@ func NewHpfeeds(host string, port int, ident string, auth string) Hpfeeds {
 		ident: ident,
 		auth:  auth,
 
-		authSent: make(chan bool),
-		channel:  make(map[string]chan Message),
+		authSent:     make(chan bool),
+		disconnected: make(chan bool, 1),
+
+		channel: make(map[string]chan Message),
 	}
 }
 
@@ -73,6 +75,7 @@ func (hp *Hpfeeds) Connect() {
 
 func (hp *Hpfeeds) Close() {
 	hp.Close()
+	disconnected <- true
 }
 
 func (hp *Hpfeeds) recvLoop() {
@@ -94,13 +97,13 @@ func (hp *Hpfeeds) recvLoop() {
 				break
 			}
 			data := buf[5:]
+			hp.parse(hdr.Opcode, data)
 			buf = buf[int(hdr.Length):]
-			hp.parsePayload(hdr.Opcode, data)
 		}
 	}
 }
 
-func (hp *Hpfeeds) parsePayload(opcode uint8, data []byte) {
+func (hp *Hpfeeds) parse(opcode uint8, data []byte) {
 	switch opcode {
 	case OPCODE_INFO:
 		hp.sendAuth(data[(1 + uint8(data[0])):])
@@ -138,39 +141,42 @@ func (hp *Hpfeeds) handleUnknown(opcode uint8, data []byte) {
 	fmt.Println("Unknown message type", opcode, data)
 }
 
-func (hp *Hpfeeds) sendRawMsg(opcode uint8, payload []byte) {
-	binary.Write(hp.conn, binary.BigEndian, rawMsgHeader{uint32(5 + len(payload)), opcode})
-	hp.conn.Write(payload)
+func (hp *Hpfeeds) sendRawMsg(opcode uint8, data []byte) {
+	binary.Write(hp.conn, binary.BigEndian, rawMsgHeader{uint32(5 + len(data)), opcode})
+	hp.conn.Write(data)
 }
 
 func (hp *Hpfeeds) sendAuth(nonce []byte) {
 	mac := sha1.New()
 	mac.Write(nonce)
-	io.WriteString(mac, hp.auth)
+	mac.Write([]byte(hp.auth))
 
 	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, uint8(len(hp.ident)))
-	if err != nil {
-		fmt.Println("binary.Write failed:", err)
-	}
-	io.WriteString(buf, hp.ident)
+	hp.writeField(buf, []byte(hp.ident), true)
 	buf.Write(mac.Sum(nil))
 	hp.sendRawMsg(OPCODE_AUTH, buf.Bytes())
 }
 
+func (hp *Hpfeeds) writeField(buf *bytes.Buffer, data []byte, withLength bool) {
+	if withLength {
+		buf.WriteByte(byte(len(data)))
+	}
+	buf.Write(data)
+}
+
 func (hp *Hpfeeds) sendSub(channel string) {
 	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, uint8(len(hp.ident)))
-	if err != nil {
-		fmt.Println("binary.Write failed:", err)
-	}
-	io.WriteString(buf, hp.ident)
-	io.WriteString(buf, channel)
+	hp.writeField(buf, []byte(hp.ident), true)
+	hp.writeField(buf, []byte(channel), false)
 	hp.sendRawMsg(OPCODE_SUB, buf.Bytes())
 }
 
-func (hp *Hpfeeds) sendPub() {
-	// TODO
+func (hp *Hpfeeds) sendPub(channel string, payload []byte) {
+	buf := new(bytes.Buffer)
+	hp.writeField(buf, []byte(hp.ident), true)
+	hp.writeField(buf, []byte(channel), true)
+	hp.writeField(buf, payload, false)
+	hp.sendRawMsg(OPCODE_PUB, buf.Bytes())
 }
 
 func (hp *Hpfeeds) Subscribe(channelName string, channel chan Message) {
@@ -183,5 +189,11 @@ func (hp *Hpfeeds) Unsubscribe(channelName string) {
 }
 
 func (hp *Hpfeeds) Publish(channelName string, channel chan []byte) {
-	// TODO
+	go func() {
+		for {
+			// TODO: check if channel is still open. if not, kill this goroutine
+			payload := <-channel
+			hp.sendPub(channelName, payload)
+		}
+	}()
 }
