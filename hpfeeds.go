@@ -108,6 +108,10 @@ func (hp *Hpfeeds) Close() {
 func (hp *Hpfeeds) close(err error) {
 	hp.conn.Close()
 	hp.setDisconnected(err)
+	select {
+		case hp.authSent <- true:
+		default:
+	}
 	hp.conn = nil
 }
 
