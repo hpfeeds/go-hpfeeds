@@ -85,6 +85,12 @@ func (hp *Hpfeeds) Connect() error {
 	go hp.recvLoop()
 	<-hp.authSent
 
+	select {
+	case err = <-hp.Disconnected:
+		return err
+	default:
+	}
+
 	return nil
 }
 
@@ -109,8 +115,8 @@ func (hp *Hpfeeds) close(err error) {
 	hp.conn.Close()
 	hp.setDisconnected(err)
 	select {
-		case hp.authSent <- true:
-		default:
+	case hp.authSent <- false:
+	default:
 	}
 	hp.conn = nil
 }
