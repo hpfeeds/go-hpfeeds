@@ -11,6 +11,8 @@ const (
 	OpAuth      = 2
 	OpPublish   = 3
 	OpSubscribe = 4
+
+	SizeOfNonce = 4 // 4 Bytes
 )
 
 // Message describes the format of hpfeeds messages, where Name represents the

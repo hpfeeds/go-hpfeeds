@@ -142,6 +142,10 @@ func (c *Client) recvLoop() {
 func (c *Client) parse(opcode uint8, data []byte) {
 	switch opcode {
 	case OpInfo:
+		log.Printf("Recieved OpInfo:\n")
+		log.Printf("Opcode: %d\n", opcode)
+		log.Printf("Data len: %d\n", len(data))
+		log.Printf("data: %x\n", data)
 		c.sendAuth(data[(1 + uint8(data[0])):])
 		c.authSent <- true
 	case OpErr:
@@ -167,11 +171,6 @@ func (c *Client) handlePub(name string, channelName string, payload []byte) {
 	channel <- Message{name, payload}
 }
 
-func writeField(buf *bytes.Buffer, data []byte) {
-	buf.WriteByte(byte(len(data)))
-	buf.Write(data)
-}
-
 func (c *Client) sendRawMsg(opcode uint8, data []byte) {
 	buf := make([]byte, 5)
 	binary.BigEndian.PutUint32(buf, uint32(5+len(data)))
@@ -189,6 +188,7 @@ func (c *Client) sendRawMsg(opcode uint8, data []byte) {
 }
 
 func (c *Client) sendAuth(nonce []byte) {
+	log.Printf("nonce: %x\n", nonce)
 	buf := new(bytes.Buffer)
 	mac := sha1.New()
 	mac.Write(nonce)

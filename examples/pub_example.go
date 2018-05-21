@@ -1,15 +1,16 @@
 package main
 
 import (
-	".."
 	"fmt"
 	"time"
+
+	".."
 )
 
 func main() {
 	fmt.Println("Sends \"test_data\" once every second for 100 seconds.")
 
-	host := "54.80.116.47"
+	host := "127.0.0.1"
 	port := 10000
 	ident := "test_ident"
 	auth := "test_secret"

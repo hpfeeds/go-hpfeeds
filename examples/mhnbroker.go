@@ -1,16 +1,15 @@
 package main
 
 import (
-	"fmt"
-
 	".."
+	"fmt"
 )
 
 func main() {
-	host := "127.0.0.1"
+	host := "54.80.116.47"
 	port := 10000
-	ident := "test_ident"
-	auth := "test_secret"
+	ident := "mhn-global-collector"
+	auth := "a7sd8djd8djd6dh3hd7dj0hdsjssj"
 
 	hp := hpfeeds.NewClient(host, port, ident, auth)
 	hp.Log = true
@@ -18,10 +17,15 @@ func main() {
 
 	// Subscribe to "flotest" and print everything coming in on it
 	channel2 := make(chan hpfeeds.Message)
-	hp.Subscribe("test_channel", channel2)
+	hp.Subscribe("mhn-community-v2.events", channel2)
 	go func() {
+		i := 0
 		for foo := range channel2 {
-			fmt.Println(foo.Name, string(foo.Payload))
+			if i%10 == 0 {
+				fmt.Println(foo.Name, string(foo.Payload))
+				fmt.Printf("Total records: %d\n", i)
+			}
+			i++
 		}
 	}()
 

@@ -1,23 +1,51 @@
 package hpfeeds
 
-import ()
-
-const (
-	ErrNilAuth = errors.New("hpfeeds: Authenticator must not be nil.")
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"sync"
+	"time"
 )
 
+// Configuration
+const (
+	KeepAlivePeriod   = 3 * time.Minute
+	DefaultBrokerPort = 10000
+)
+
+// Errors
+var (
+	ErrNilDB    = errors.New("hpfeeds: DB must not be nil")
+	ErrAuthFail = errors.New("hpfeeds: Bad credentials")
+	ErrPubFail  = errors.New("hpfeeds: You do not have permission to publish to this channel")
+	ErrSubFail  = errors.New("hpfeeds: You do not have permission to subscribe to this channel")
+	ErrNilConn  = errors.New("hpfeeds: Session Conn is nil")
+)
+
+// Broker contains all needed configuration for a running broker server.
 type Broker struct {
-	Port int
+	Name        string
+	Port        int
+	DB          Identifier
+	subMutex    sync.RWMutex
+	subscribers map[string][]*Session
 }
 
-func ListenAndServe(auth *Authenticator) error {
-	b := &Broker{Port: 10000}
-	return b.ListenAndServe(auth)
+// ListenAndServe uses a default broker and starts serving.
+func ListenAndServe(name string, port int, db Identifier) error {
+	// With no special config, create new Broker with default port.
+	b := &Broker{Name: name, Port: port, DB: db}
+	return b.ListenAndServe()
 }
 
-func (b *Broker) ListenAndServe(auth *Authenticator) error {
-	if auth == nil {
-		return ErrNilAuth
+func (b *Broker) ListenAndServe() error {
+	if b.DB == nil {
+		return ErrNilDB
 	}
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", b.Port))
@@ -25,35 +53,207 @@ func (b *Broker) ListenAndServe(auth *Authenticator) error {
 		return err
 	}
 
-	return b.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+	b.subscribers = make(map[string][]*Session)
+
+	return b.serve(ln.(*net.TCPListener))
 }
 
-func (b *Broker) Serve(ln *net.TCPListener) error {
+func (b *Broker) serve(ln *net.TCPListener) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return err
 		}
-		go handleConnection(conn)
+		s := NewSession(conn.(*net.TCPConn))
+		log.Printf("New session: %v\n", s)
+		go b.serveSession(s)
 	}
 }
 
-// From net/http https://golang.org/src/net/http/server.go?s=91084:91139#L3207
+func (b *Broker) serveSession(s *Session) {
+	defer s.Conn.Close()
 
-// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
-// connections. It's used by ListenAndServe and ListenAndServeTLS so
-// dead TCP connections (e.g. closing laptop mid-download) eventually
-// go away.
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
-	tc, err := ln.AcceptTCP()
+	// First, we must send an info message requesting auth. To do so, we first
+	// generate a 4 byte nonce to send to the client.
+	s.Nonce = make([]byte, SizeOfNonce)
+	log.Printf("Generated new nonce...\n")
+	_, err := rand.Read(s.Nonce)
 	if err != nil {
-		return nil, err
+		log.Printf("Error generating nonce: %s\n", err.Error())
+		s.Conn.Close()
+		return
 	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
+
+	buf := new(bytes.Buffer)
+	log.Printf("nonce: %x\n", s.Nonce)
+	writeField(buf, []byte(b.Name))
+	buf.Write(s.Nonce)
+	s.sendRawMessage(OpInfo, buf.Bytes())
+
+	b.recvLoop(s)
+}
+
+func (b *Broker) recvLoop(s *Session) {
+	// Prepare a buffer for reading from the wire.
+	var buf []byte
+
+	for s.Conn != nil {
+		readbuf := make([]byte, 1024)
+
+		n, err := s.Conn.Read(readbuf)
+		if err != nil {
+			log.Printf("Read(): %s\n", err)
+			return
+		}
+
+		buf = append(buf, readbuf[:n]...)
+
+		for len(buf) > 5 {
+			hdr := messageHeader{}
+			hdr.Length = binary.BigEndian.Uint32(buf[0:4]) // Get the length of the message.
+			hdr.Opcode = uint8(buf[4])
+			// Check to see if buf holds the full message or if we need to get more data off the wire first.
+			if len(buf) < int(hdr.Length) {
+				break
+			}
+			data := buf[5:int(hdr.Length)]
+			b.parse(s, hdr.Opcode, data)
+			buf = buf[int(hdr.Length):]
+		}
+	}
+}
+
+func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
+	log.Printf("Parse opcode: %d\n", opcode)
+	switch opcode {
+	case OpErr:
+		log.Printf("Received error from client: %s\n", string(data))
+	case OpInfo: // Unexpected if received server side.
+		log.Printf("Received OpInfo from client: %s\n", string(data))
+	case OpAuth:
+		b.parseAuth(s, data)
+	case OpPublish:
+		len1 := uint8(data[0])
+		name := string(data[1:(1 + len1)])
+		len2 := uint8(data[1+len1])
+		channel := string(data[(1 + len1 + 1):(1 + len1 + 1 + len2)])
+		payload := data[1+len1+1+len2:]
+		b.handlePub(s, name, channel, payload)
+	case OpSubscribe:
+		log.Printf("payload: %x\n", data)
+		len1 := uint8(data[0])
+		log.Printf("len1: %d\n", len1)
+		name := string(data[1:(1 + len1)])
+		log.Printf("name: %s\n", name)
+		channel := string(data[(1 + len1):])
+		log.Printf("channel: %d\n", channel)
+		b.handleSub(s, name, channel)
+
+	default:
+		log.Printf("Received message with unknown type %d\n", opcode)
+	}
+}
+
+func (b *Broker) handleSub(s *Session, name, channel string) {
+	log.Println("handleSub")
+	log.Printf("Authenticated? %b\n", s.Authenticated)
+	log.Printf("Name: %s\n", name)
+	log.Printf("Channel: %s\n", channel)
+	if !s.Authenticated {
+		s.sendAuthErr()
+	}
+	id := s.Identity
+	subs := id.SubChannels
+
+	log.Printf("%v: %v", channel, subs)
+	if stringInSlice(channel, subs) {
+		b.subMutex.Lock()
+		b.subscribers[channel] = append(b.subscribers[channel], s)
+		b.subMutex.Unlock()
+	} else {
+		s.sendSubErr()
+	}
+
+}
+
+func (b *Broker) handlePub(s *Session, name string, channel string, payload []byte) {
+	log.Println("handlePub")
+	log.Printf("Authenticated? %b\n", s.Authenticated)
+	log.Printf("Name: %s\n", name)
+	log.Printf("Channel: %s\n", channel)
+	log.Printf("Payload: %x\n", payload)
+	if !s.Authenticated {
+		s.sendAuthErr()
+	}
+	id := s.Identity
+	pubs := id.PubChannels
+
+	if stringInSlice(channel, pubs) {
+		b.sendToChannel(name, channel, payload)
+	} else {
+		s.sendPubErr()
+	}
+}
+
+func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
+
+	buf := new(bytes.Buffer)
+	writeField(buf, []byte(name))
+	writeField(buf, []byte(channel))
+	writeField(buf, payload)
+
+	b.subMutex.RLock()
+	sessions := b.subscribers[channel]
+
+	for _, s := range sessions {
+		err := s.sendRawMessage(OpPublish, buf.Bytes())
+		if err != nil {
+			if s.Conn != nil {
+				s.Conn.Close()
+				s.Conn = nil
+			}
+			log.Printf("%s\n", err.Error())
+			defer b.pruneSessions(channel)
+		}
+	}
+	b.subMutex.RUnlock()
+}
+
+// Remove any closed Sessions.
+func (b *Broker) pruneSessions(channel string) {
+	b.subMutex.Lock()
+	defer b.subMutex.Unlock()
+
+	var valid []*Session
+	for _, s := range b.subscribers[channel] {
+		if s.Conn != nil {
+			valid = append(valid, s)
+		}
+	}
+	b.subscribers[channel] = valid
+}
+
+// Parse an auth request.
+func (b *Broker) parseAuth(s *Session, data []byte) {
+	log.Printf("Parse auth: %x\n", data)
+	len := uint8(data[0])
+	log.Printf("len: %d\n", len)
+	ident := string(data[1 : 1+len])
+	log.Printf("ident: %s\n", ident)
+	hash := data[1+len:]
+	log.Printf("hash: %x\n", hash)
+	id, err := b.DB.Identify(ident)
+	if err != nil {
+		log.Printf("Failure identifying ident: %v\n", err)
+		s.sendAuthErr()
+		s.Conn.Close()
+		return
+	}
+	s.Identity = id
+	s.authenticate(hash)
+	if !s.Authenticated {
+		s.sendAuthErr()
+	}
+	log.Println("we made it here")
+
 }
