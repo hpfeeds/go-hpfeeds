@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -43,7 +42,13 @@ func ListenAndServe(name string, port int, db Identifier) error {
 	return b.ListenAndServe()
 }
 
+// ListenAndServe starts a TCP listener and begins listening for incoming connections.
 func (b *Broker) ListenAndServe() error {
+	logDebug("ListenAndServe with Broker:\n")
+	logDebug("\tb.Name: %s\n", b.Name)
+	logDebug("\tb.Port: %s\n", b.Port)
+	logDebug("\tb.DB: %v\n", b.DB)
+
 	if b.DB == nil {
 		return ErrNilDB
 	}
@@ -65,7 +70,7 @@ func (b *Broker) serve(ln *net.TCPListener) error {
 			return err
 		}
 		s := NewSession(conn.(*net.TCPConn))
-		log.Printf("New session: %v\n", s)
+		logDebug("New session: %v\n", s)
 		go b.serveSession(s)
 	}
 }
@@ -76,16 +81,16 @@ func (b *Broker) serveSession(s *Session) {
 	// First, we must send an info message requesting auth. To do so, we first
 	// generate a 4 byte nonce to send to the client.
 	s.Nonce = make([]byte, SizeOfNonce)
-	log.Printf("Generated new nonce...\n")
+	logDebug("Generated new nonce...\n")
 	_, err := rand.Read(s.Nonce)
 	if err != nil {
-		log.Printf("Error generating nonce: %s\n", err.Error())
+		logError("Error generating nonce: %s\n", err.Error())
 		s.Conn.Close()
 		return
 	}
 
 	buf := new(bytes.Buffer)
-	log.Printf("nonce: %x\n", s.Nonce)
+	logDebug("nonce: %x\n", s.Nonce)
 	writeField(buf, []byte(b.Name))
 	buf.Write(s.Nonce)
 	s.sendRawMessage(OpInfo, buf.Bytes())
@@ -102,7 +107,7 @@ func (b *Broker) recvLoop(s *Session) {
 
 		n, err := s.Conn.Read(readbuf)
 		if err != nil {
-			log.Printf("Read(): %s\n", err)
+			logDebug("Read(): %s\n", err)
 			return
 		}
 
@@ -124,12 +129,12 @@ func (b *Broker) recvLoop(s *Session) {
 }
 
 func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
-	log.Printf("Parse opcode: %d\n", opcode)
+	logDebug("Parse opcode: %d\n", opcode)
 	switch opcode {
 	case OpErr:
-		log.Printf("Received error from client: %s\n", string(data))
+		logError("Received error from client: %s\n", string(data))
 	case OpInfo: // Unexpected if received server side.
-		log.Printf("Received OpInfo from client: %s\n", string(data))
+		logError("Received OpInfo from client: %s\n", string(data))
 	case OpAuth:
 		b.parseAuth(s, data)
 	case OpPublish:
@@ -140,32 +145,32 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 		payload := data[1+len1+1+len2:]
 		b.handlePub(s, name, channel, payload)
 	case OpSubscribe:
-		log.Printf("payload: %x\n", data)
+		logDebug("payload: %x\n", data)
 		len1 := uint8(data[0])
-		log.Printf("len1: %d\n", len1)
+		logDebug("len1: %d\n", len1)
 		name := string(data[1:(1 + len1)])
-		log.Printf("name: %s\n", name)
+		logDebug("name: %s\n", name)
 		channel := string(data[(1 + len1):])
-		log.Printf("channel: %d\n", channel)
+		logDebug("channel: %d\n", channel)
 		b.handleSub(s, name, channel)
 
 	default:
-		log.Printf("Received message with unknown type %d\n", opcode)
+		logError("Received message with unknown type %d\n", opcode)
 	}
 }
 
 func (b *Broker) handleSub(s *Session, name, channel string) {
-	log.Println("handleSub")
-	log.Printf("Authenticated? %b\n", s.Authenticated)
-	log.Printf("Name: %s\n", name)
-	log.Printf("Channel: %s\n", channel)
+	logDebug("handleSub")
+	logDebug("\tAuthenticated? %b\n", s.Authenticated)
+	logDebug("\tName: %s\n", name)
+	logDebug("\tChannel: %s\n", channel)
 	if !s.Authenticated {
 		s.sendAuthErr()
 	}
 	id := s.Identity
 	subs := id.SubChannels
 
-	log.Printf("%v: %v", channel, subs)
+	logDebug("%v: %v", channel, subs)
 	if stringInSlice(channel, subs) {
 		b.subMutex.Lock()
 		b.subscribers[channel] = append(b.subscribers[channel], s)
@@ -177,11 +182,11 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 }
 
 func (b *Broker) handlePub(s *Session, name string, channel string, payload []byte) {
-	log.Println("handlePub")
-	log.Printf("Authenticated? %b\n", s.Authenticated)
-	log.Printf("Name: %s\n", name)
-	log.Printf("Channel: %s\n", channel)
-	log.Printf("Payload: %x\n", payload)
+	log.Debug("handlePub")
+	logDebug("\tAuthenticated? %b\n", s.Authenticated)
+	logDebug("\tName: %s\n", name)
+	logDebug("\tChannel: %s\n", channel)
+	logDebug("\tPayload: %x\n", payload)
 	if !s.Authenticated {
 		s.sendAuthErr()
 	}
@@ -196,7 +201,6 @@ func (b *Broker) handlePub(s *Session, name string, channel string, payload []by
 }
 
 func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
-
 	buf := new(bytes.Buffer)
 	writeField(buf, []byte(name))
 	writeField(buf, []byte(channel))
@@ -212,7 +216,7 @@ func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
 				s.Conn.Close()
 				s.Conn = nil
 			}
-			log.Printf("%s\n", err.Error())
+			logError("%s\n", err.Error())
 			defer b.pruneSessions(channel)
 		}
 	}
@@ -235,16 +239,16 @@ func (b *Broker) pruneSessions(channel string) {
 
 // Parse an auth request.
 func (b *Broker) parseAuth(s *Session, data []byte) {
-	log.Printf("Parse auth: %x\n", data)
+	logDebug("Parse auth: %x\n", data)
 	len := uint8(data[0])
-	log.Printf("len: %d\n", len)
+	logDebug("len: %d\n", len)
 	ident := string(data[1 : 1+len])
-	log.Printf("ident: %s\n", ident)
+	logDebug("ident: %s\n", ident)
 	hash := data[1+len:]
-	log.Printf("hash: %x\n", hash)
+	logDebug("hash: %x\n", hash)
 	id, err := b.DB.Identify(ident)
 	if err != nil {
-		log.Printf("Failure identifying ident: %v\n", err)
+		logError("Failure identifying ident: %v\n", err)
 		s.sendAuthErr()
 		s.Conn.Close()
 		return
@@ -254,6 +258,4 @@ func (b *Broker) parseAuth(s *Session, data []byte) {
 	if !s.Authenticated {
 		s.sendAuthErr()
 	}
-	log.Println("we made it here")
-
 }
