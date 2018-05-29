@@ -2,26 +2,22 @@ package hpfeeds
 
 type Logger func(...interface{})
 
-var debugLog Logger = nil
-
-func SetDebugLogger(logger Logger) {
-	debugLog = logger
+func (b *Broker) SetDebugLogger(logger Logger) {
+	b.debugLog = logger
 }
 
-func logDebug(args ...interface{}) {
-	if debugLog != nil {
+func (b *Broker) logDebug(args ...interface{}) {
+	if b.debugLog != nil {
 		debugLog(args)
 	}
 }
 
-var errorLog Logger = nil
-
-func SetErrorLogger(logger Logger) {
-	errorLog = logger
+func (b *Broker) SetErrorLogger(logger Logger) {
+	b.errorLog = logger
 }
 
-func logError(args ...interface{}) {
-	if errorLog != nil {
+func (b *Broker) logError(args ...interface{}) {
+	if b.errorLog != nil {
 		errorLog(args)
 	}
 }

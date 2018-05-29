@@ -33,6 +33,9 @@ type Broker struct {
 	DB          Identifier
 	subMutex    sync.RWMutex
 	subscribers map[string][]*Session
+
+	debugLog Logger
+	errorLog Logger
 }
 
 // ListenAndServe uses a default broker and starts serving.
@@ -44,10 +47,10 @@ func ListenAndServe(name string, port int, db Identifier) error {
 
 // ListenAndServe starts a TCP listener and begins listening for incoming connections.
 func (b *Broker) ListenAndServe() error {
-	logDebug("ListenAndServe with Broker:\n")
-	logDebug("\tb.Name: %s\n", b.Name)
-	logDebug("\tb.Port: %s\n", b.Port)
-	logDebug("\tb.DB: %v\n", b.DB)
+	b.logDebug("ListenAndServe with Broker:\n")
+	b.logDebug("\tb.Name: %s\n", b.Name)
+	b.logDebug("\tb.Port: %s\n", b.Port)
+	b.logDebug("\tb.DB: %v\n", b.DB)
 
 	if b.DB == nil {
 		return ErrNilDB
@@ -70,7 +73,7 @@ func (b *Broker) serve(ln *net.TCPListener) error {
 			return err
 		}
 		s := NewSession(conn.(*net.TCPConn))
-		logDebug("New session: %v\n", s)
+		b.logDebug("New session: %v\n", s)
 		go b.serveSession(s)
 	}
 }
@@ -81,16 +84,16 @@ func (b *Broker) serveSession(s *Session) {
 	// First, we must send an info message requesting auth. To do so, we first
 	// generate a 4 byte nonce to send to the client.
 	s.Nonce = make([]byte, SizeOfNonce)
-	logDebug("Generated new nonce...\n")
+	b.logDebug("Generated new nonce...\n")
 	_, err := rand.Read(s.Nonce)
 	if err != nil {
-		logError("Error generating nonce: %s\n", err.Error())
+		b.logError("Error generating nonce: %s\n", err.Error())
 		s.Conn.Close()
 		return
 	}
 
 	buf := new(bytes.Buffer)
-	logDebug("nonce: %x\n", s.Nonce)
+	b.logDebug("nonce: %x\n", s.Nonce)
 	writeField(buf, []byte(b.Name))
 	buf.Write(s.Nonce)
 	s.sendRawMessage(OpInfo, buf.Bytes())
@@ -107,7 +110,7 @@ func (b *Broker) recvLoop(s *Session) {
 
 		n, err := s.Conn.Read(readbuf)
 		if err != nil {
-			logDebug("Read(): %s\n", err)
+			b.logDebug("Read(): %s\n", err)
 			return
 		}
 
@@ -129,12 +132,12 @@ func (b *Broker) recvLoop(s *Session) {
 }
 
 func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
-	logDebug("Parse opcode: %d\n", opcode)
+	b.logDebug("Parse opcode: %d\n", opcode)
 	switch opcode {
 	case OpErr:
-		logError("Received error from client: %s\n", string(data))
+		b.logError("Received error from client: %s\n", string(data))
 	case OpInfo: // Unexpected if received server side.
-		logError("Received OpInfo from client: %s\n", string(data))
+		b.logError("Received OpInfo from client: %s\n", string(data))
 	case OpAuth:
 		b.parseAuth(s, data)
 	case OpPublish:
@@ -145,32 +148,32 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 		payload := data[1+len1+1+len2:]
 		b.handlePub(s, name, channel, payload)
 	case OpSubscribe:
-		logDebug("payload: %x\n", data)
+		b.logDebug("payload: %x\n", data)
 		len1 := uint8(data[0])
-		logDebug("len1: %d\n", len1)
+		b.logDebug("len1: %d\n", len1)
 		name := string(data[1:(1 + len1)])
-		logDebug("name: %s\n", name)
+		b.logDebug("name: %s\n", name)
 		channel := string(data[(1 + len1):])
-		logDebug("channel: %d\n", channel)
+		b.logDebug("channel: %d\n", channel)
 		b.handleSub(s, name, channel)
 
 	default:
-		logError("Received message with unknown type %d\n", opcode)
+		b.logError("Received message with unknown type %d\n", opcode)
 	}
 }
 
 func (b *Broker) handleSub(s *Session, name, channel string) {
-	logDebug("handleSub")
-	logDebug("\tAuthenticated? %b\n", s.Authenticated)
-	logDebug("\tName: %s\n", name)
-	logDebug("\tChannel: %s\n", channel)
+	b.logDebug("handleSub")
+	b.logDebug("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebug("\tName: %s\n", name)
+	b.logDebug("\tChannel: %s\n", channel)
 	if !s.Authenticated {
 		s.sendAuthErr()
 	}
 	id := s.Identity
 	subs := id.SubChannels
 
-	logDebug("%v: %v", channel, subs)
+	b.logDebug("%v: %v", channel, subs)
 	if stringInSlice(channel, subs) {
 		b.subMutex.Lock()
 		b.subscribers[channel] = append(b.subscribers[channel], s)
@@ -182,11 +185,11 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 }
 
 func (b *Broker) handlePub(s *Session, name string, channel string, payload []byte) {
-	log.Debug("handlePub")
-	logDebug("\tAuthenticated? %b\n", s.Authenticated)
-	logDebug("\tName: %s\n", name)
-	logDebug("\tChannel: %s\n", channel)
-	logDebug("\tPayload: %x\n", payload)
+	b.logDebug("handlePub")
+	b.logDebug("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebug("\tName: %s\n", name)
+	b.logDebug("\tChannel: %s\n", channel)
+	b.logDebug("\tPayload: %x\n", payload)
 	if !s.Authenticated {
 		s.sendAuthErr()
 	}
@@ -216,7 +219,7 @@ func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
 				s.Conn.Close()
 				s.Conn = nil
 			}
-			logError("%s\n", err.Error())
+			b.logError("%s\n", err.Error())
 			defer b.pruneSessions(channel)
 		}
 	}
@@ -239,16 +242,16 @@ func (b *Broker) pruneSessions(channel string) {
 
 // Parse an auth request.
 func (b *Broker) parseAuth(s *Session, data []byte) {
-	logDebug("Parse auth: %x\n", data)
+	b.logDebug("Parse auth: %x\n", data)
 	len := uint8(data[0])
-	logDebug("len: %d\n", len)
+	b.logDebug("len: %d\n", len)
 	ident := string(data[1 : 1+len])
-	logDebug("ident: %s\n", ident)
+	b.logDebug("ident: %s\n", ident)
 	hash := data[1+len:]
-	logDebug("hash: %x\n", hash)
+	b.logDebug("hash: %x\n", hash)
 	id, err := b.DB.Identify(ident)
 	if err != nil {
-		logError("Failure identifying ident: %v\n", err)
+		b.logError("Failure identifying ident: %v\n", err)
 		s.sendAuthErr()
 		s.Conn.Close()
 		return
