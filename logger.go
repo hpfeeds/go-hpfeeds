@@ -8,7 +8,7 @@ func (b *Broker) SetDebugLogger(logger Logger) {
 
 func (b *Broker) logDebug(args ...interface{}) {
 	if b.debugLog != nil {
-		debugLog(args)
+		b.debugLog(args)
 	}
 }
 
@@ -18,6 +18,6 @@ func (b *Broker) SetErrorLogger(logger Logger) {
 
 func (b *Broker) logError(args ...interface{}) {
 	if b.errorLog != nil {
-		errorLog(args)
+		b.errorLog(args)
 	}
 }
