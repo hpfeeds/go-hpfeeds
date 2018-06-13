@@ -19,11 +19,12 @@ const (
 
 // Errors
 var (
-	ErrNilDB    = errors.New("hpfeeds: DB must not be nil")
-	ErrAuthFail = errors.New("hpfeeds: Bad credentials")
-	ErrPubFail  = errors.New("hpfeeds: You do not have permission to publish to this channel")
-	ErrSubFail  = errors.New("hpfeeds: You do not have permission to subscribe to this channel")
-	ErrNilConn  = errors.New("hpfeeds: Session Conn is nil")
+	ErrNilDB         = errors.New("hpfeeds: DB must not be nil")
+	ErrAuthFail      = errors.New("hpfeeds: Bad credentials")
+	ErrPubFail       = errors.New("hpfeeds: You do not have permission to publish to this channel")
+	ErrSubFail       = errors.New("hpfeeds: You do not have permission to subscribe to this channel")
+	ErrNilConn       = errors.New("hpfeeds: Session Conn is nil")
+	ErrInvalidPacket = errors.New("hpfeeds: Invalid packet structure")
 )
 
 // Broker contains all needed configuration for a running broker server.
@@ -73,30 +74,35 @@ func (b *Broker) serve(ln *net.TCPListener) error {
 			return err
 		}
 		s := NewSession(conn.(*net.TCPConn))
+		//TODO: Let's print the IP of the connection here. Maybe other useful info instead of just a ptr to the Conn.
 		b.logDebug("New session: %v\n", s)
-		go b.serveSession(s)
+		go b.serveSession(s) // Kick off the session and keep listening.
 	}
 }
 
-func (b *Broker) serveSession(s *Session) {
-	defer s.Conn.Close()
-
+func (b *Broker) sendInfoRequest(s *Session) error {
 	// First, we must send an info message requesting auth. To do so, we first
 	// generate a 4 byte nonce to send to the client.
 	s.Nonce = make([]byte, SizeOfNonce)
-	b.logDebug("Generated new nonce...\n")
 	_, err := rand.Read(s.Nonce)
 	if err != nil {
-		b.logError("Error generating nonce: %s\n", err.Error())
-		s.Conn.Close()
-		return
+		return err
 	}
 
 	buf := new(bytes.Buffer)
-	b.logDebug("nonce: %x\n", s.Nonce)
+	b.logDebug("Generated nonce: %x\n", s.Nonce)
 	writeField(buf, []byte(b.Name))
 	buf.Write(s.Nonce)
 	s.sendRawMessage(OpInfo, buf.Bytes())
+
+	return nil
+}
+
+func (b *Broker) serveSession(s *Session) {
+	// Defer close since we're already in a goroutine and won't be forking again.
+	defer s.Conn.Close()
+
+	b.sendInfoRequest(s)
 
 	b.recvLoop(s)
 }
@@ -139,22 +145,40 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 	case OpInfo: // Unexpected if received server side.
 		b.logError("Received OpInfo from client: %s\n", string(data))
 	case OpAuth:
-		b.parseAuth(s, data)
+		err := b.parseAuth(s, data)
+		if err != nil {
+			b.logError(err.Error())
+			s.sendAuthErr()
+			s.Conn.Close()
+		}
 	case OpPublish:
+		flen := len(data)
 		len1 := uint8(data[0])
+		// Make sure supplied length isn't actually overbounds.
+		if int(1+len1) > flen {
+			b.logError("Invalid length on packet.")
+			return
+		}
 		name := string(data[1:(1 + len1)])
+
 		len2 := uint8(data[1+len1])
+		if int(1+len1+1+len2) > flen {
+			b.logError("Invalid length on packet.")
+			return
+		}
+
 		channel := string(data[(1 + len1 + 1):(1 + len1 + 1 + len2)])
 		payload := data[1+len1+1+len2:]
 		b.handlePub(s, name, channel, payload)
 	case OpSubscribe:
-		b.logDebug("payload: %x\n", data)
+		flen := len(data)
 		len1 := uint8(data[0])
-		b.logDebug("len1: %d\n", len1)
+		if int(1+len1) > flen {
+			b.logError("Invalid length on packet.")
+			return
+		}
 		name := string(data[1:(1 + len1)])
-		b.logDebug("name: %s\n", name)
 		channel := string(data[(1 + len1):])
-		b.logDebug("channel: %d\n", channel)
 		b.handleSub(s, name, channel)
 
 	default:
@@ -241,24 +265,23 @@ func (b *Broker) pruneSessions(channel string) {
 }
 
 // Parse an auth request.
-func (b *Broker) parseAuth(s *Session, data []byte) {
-	b.logDebug("Parse auth: %x\n", data)
-	len := uint8(data[0])
-	b.logDebug("len: %d\n", len)
-	ident := string(data[1 : 1+len])
-	b.logDebug("ident: %s\n", ident)
-	hash := data[1+len:]
-	b.logDebug("hash: %x\n", hash)
+func (b *Broker) parseAuth(s *Session, data []byte) error {
+	flen := uint8(data[0])
+	if int(flen+1) > len(data) {
+		return ErrInvalidPacket
+	}
+
+	ident := string(data[1 : 1+flen])
+	hash := data[1+flen:]
 	id, err := b.DB.Identify(ident)
 	if err != nil {
-		b.logError("Failure identifying ident: %v\n", err)
-		s.sendAuthErr()
-		s.Conn.Close()
-		return
+		return ErrAuthFail
 	}
+
 	s.Identity = id
 	s.authenticate(hash)
 	if !s.Authenticated {
-		s.sendAuthErr()
+		return ErrAuthFail
 	}
+	return nil
 }
