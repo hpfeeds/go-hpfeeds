@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	".."
+	"github.com/d1str0/go-hpfeeds"
 )
 
 func main() {

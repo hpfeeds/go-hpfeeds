@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log"
 
-	".."
+	"github.com/d1str0/go-hpfeeds"
 )
 
 func main() {
