@@ -109,7 +109,7 @@ func (b *Broker) serveSession(s *Session) {
 	b.clientCount = b.clientCount + 1
 	count := b.clientCount
 	b.countMutex.Unlock()
-	b.logInfo("Now serving %d clients...\n", count)
+	b.logInfof("Now serving %d clients...\n", count)
 
 	// Defer close since we're already in a goroutine and won't be forking again.
 	defer s.Conn.Close()
