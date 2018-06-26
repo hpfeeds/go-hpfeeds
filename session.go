@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
-	"log"
 	"net"
 )
 
@@ -21,7 +20,6 @@ func NewSession(conn *net.TCPConn) *Session {
 	return &Session{Authenticated: false, Conn: conn, Identity: nil}
 }
 func (s *Session) sendAuthErr() {
-	log.Println("Sending auth err")
 	s.sendRawMessage(OpErr, []byte(ErrAuthFail.Error()))
 }
 
@@ -33,22 +31,15 @@ func (s *Session) sendSubErr() {
 }
 
 func (s *Session) authenticate(clientHash []byte) {
-	log.Printf("clientHash: %x\n", clientHash)
-	log.Printf("ID: %v\n", s.Identity)
 	mac := sha1.New()
 	mac.Write(s.Nonce)
 	mac.Write([]byte(s.Identity.Secret))
 	servHash := mac.Sum(nil)
-	log.Printf("servHash: %x\n", servHash)
 	if bytes.Equal(servHash, clientHash) {
 		s.Authenticated = true
 	}
 }
 func (s *Session) sendRawMessage(opcode uint8, data []byte) error {
-	log.Printf("Sending raw message: \n")
-	log.Printf("Opcode: %d\n", opcode)
-	log.Printf("Data Len: %d\n", len(data))
-	log.Printf("Data: %x\n", data)
 	if s.Conn == nil {
 		return ErrNilConn
 	}
@@ -59,7 +50,6 @@ func (s *Session) sendRawMessage(opcode uint8, data []byte) error {
 	for len(buf) > 0 {
 		n, err := s.Conn.Write(buf)
 		if err != nil {
-			log.Printf("Write(): %s\n", err)
 			s.Conn.Close()
 			s.Conn = nil
 			return err

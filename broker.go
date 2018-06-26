@@ -35,8 +35,12 @@ type Broker struct {
 	subMutex    sync.RWMutex
 	subscribers map[string][]*Session
 
+	clientCount int
+	countMutex  sync.RWMutex
+
 	debugLog Logger
 	errorLog Logger
+	infoLog  Logger
 }
 
 // ListenAndServe uses a default broker and starts serving.
@@ -48,6 +52,7 @@ func ListenAndServe(name string, port int, db Identifier) error {
 
 // ListenAndServe starts a TCP listener and begins listening for incoming connections.
 func (b *Broker) ListenAndServe() error {
+	// TODO: Create a debug log function to call to pretty print this.
 	b.logDebug("ListenAndServe with Broker:\n")
 	b.logDebug("\tb.Name: %s\n", b.Name)
 	b.logDebug("\tb.Port: %s\n", b.Port)
@@ -68,6 +73,7 @@ func (b *Broker) ListenAndServe() error {
 }
 
 func (b *Broker) serve(ln *net.TCPListener) error {
+	b.logInfof("Now serving hpfeeds on port %d\n", b.Port)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -99,12 +105,21 @@ func (b *Broker) sendInfoRequest(s *Session) error {
 }
 
 func (b *Broker) serveSession(s *Session) {
+	b.countMutex.Lock()
+	b.clientCount = b.clientCount + 1
+	count := b.clientCount
+	b.countMutex.Unlock()
+	b.logInfo("Now serving %d clients...\n", count)
+
 	// Defer close since we're already in a goroutine and won't be forking again.
 	defer s.Conn.Close()
 
 	b.sendInfoRequest(s)
 
 	b.recvLoop(s)
+	b.countMutex.Lock()
+	b.clientCount = b.clientCount - 1
+	b.countMutex.Unlock()
 }
 
 func (b *Broker) recvLoop(s *Session) {
