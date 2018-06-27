@@ -112,7 +112,7 @@ func (b *Broker) serveSession(s *Session) {
 	b.logInfof("Now serving %d clients...\n", count)
 
 	// Defer close since we're already in a goroutine and won't be forking again.
-	defer s.Conn.Close()
+	defer s.Close()
 
 	b.sendInfoRequest(s)
 
@@ -164,7 +164,7 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 		if err != nil {
 			b.logError(err.Error())
 			s.sendAuthErr()
-			s.Conn.Close()
+			s.Close()
 		}
 	case OpPublish:
 		flen := len(data)
@@ -208,6 +208,7 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 	b.logDebug("\tChannel: %s\n", channel)
 	if !s.Authenticated {
 		s.sendAuthErr()
+		return
 	}
 	id := s.Identity
 	subs := id.SubChannels
@@ -219,6 +220,7 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 		b.subMutex.Unlock()
 	} else {
 		s.sendSubErr()
+		return
 	}
 
 }
@@ -231,6 +233,7 @@ func (b *Broker) handlePub(s *Session, name string, channel string, payload []by
 	b.logDebug("\tPayload: %x\n", payload)
 	if !s.Authenticated {
 		s.sendAuthErr()
+		return
 	}
 	id := s.Identity
 	pubs := id.PubChannels
@@ -239,6 +242,7 @@ func (b *Broker) handlePub(s *Session, name string, channel string, payload []by
 		b.sendToChannel(name, channel, payload)
 	} else {
 		s.sendPubErr()
+		return
 	}
 }
 
