@@ -14,7 +14,7 @@ type Session struct {
 	Authenticated bool
 	Identity      *Identity
 	Conn          *net.TCPConn
-	connMutex     *sync.RWMutex
+	connMutex     sync.RWMutex
 	Nonce         []byte
 }
 
