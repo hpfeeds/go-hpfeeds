@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"net"
+	"sync"
 )
 
 // A session keeps track of whether or not a connection session has been
@@ -13,12 +14,24 @@ type Session struct {
 	Authenticated bool
 	Identity      *Identity
 	Conn          *net.TCPConn
+	connMutex     *sync.RWMutex
 	Nonce         []byte
 }
 
 func NewSession(conn *net.TCPConn) *Session {
 	return &Session{Authenticated: false, Conn: conn, Identity: nil}
 }
+
+// Close will close the connection and set Conn to nil. This is a thread safe function.
+func (s *Session) Close() {
+	s.connMutex.Lock()
+	if s.Conn != nil {
+		s.Conn.Close()
+		s.Conn = nil
+	}
+	s.connMutex.Unlock()
+}
+
 func (s *Session) sendAuthErr() {
 	s.sendRawMessage(OpErr, []byte(ErrAuthFail.Error()))
 }
@@ -39,10 +52,13 @@ func (s *Session) authenticate(clientHash []byte) {
 		s.Authenticated = true
 	}
 }
+
 func (s *Session) sendRawMessage(opcode uint8, data []byte) error {
+	s.connMutex.RLock() // Don't defer since we might unlock sooner for Close()
 	if s.Conn == nil {
 		return ErrNilConn
 	}
+
 	buf := make([]byte, 5)
 	binary.BigEndian.PutUint32(buf, uint32(5+len(data)))
 	buf[4] = byte(opcode)
@@ -50,11 +66,12 @@ func (s *Session) sendRawMessage(opcode uint8, data []byte) error {
 	for len(buf) > 0 {
 		n, err := s.Conn.Write(buf)
 		if err != nil {
-			s.Conn.Close()
-			s.Conn = nil
+			s.connMutex.RUnlock()
+			s.Close()
 			return err
 		}
 		buf = buf[n:]
 	}
+	s.connMutex.RUnlock()
 	return nil
 }

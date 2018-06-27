@@ -254,10 +254,7 @@ func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
 	for _, s := range sessions {
 		err := s.sendRawMessage(OpPublish, buf.Bytes())
 		if err != nil {
-			if s.Conn != nil {
-				s.Conn.Close()
-				s.Conn = nil
-			}
+			s.Close() // Close this session as we got an error. Not worth recovering.
 			b.logError("%s\n", err.Error())
 			defer b.pruneSessions(channel)
 		}
