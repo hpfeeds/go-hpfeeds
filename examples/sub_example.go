@@ -14,17 +14,24 @@ func main() {
 
 	hp := hpfeeds.NewClient(host, port, ident, auth)
 	hp.Log = true
-	hp.Connect()
 
-	// Subscribe to "flotest" and print everything coming in on it
-	channel2 := make(chan hpfeeds.Message)
-	hp.Subscribe("test_channel", channel2)
+	msgs := make(chan hpfeeds.Message)
 	go func() {
-		for foo := range channel2 {
+		for foo := range msgs {
 			fmt.Println(foo.Name, string(foo.Payload))
 		}
 	}()
 
-	// Wait for disconnect
-	<-hp.Disconnected
+	for {
+		fmt.Println("Connecting to hpfeeds server.")
+		hp.Connect()
+
+		// Subscribe to "flotest" and print everything coming in on it
+		hp.Subscribe("test_channel", channel2)
+
+		// Wait for disconnect
+		<-hp.Disconnected
+		fmt.Println("Disconnected, attemting reconnect in 10 seconds...")
+		time.Sleep(10 * time.Seconds)
+	}
 }
