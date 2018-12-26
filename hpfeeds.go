@@ -25,11 +25,11 @@ type rawMsgHeader struct {
 }
 
 const (
-	opcode_err  = 0
-	opcode_info = 1
-	opcode_auth = 2
-	opcode_pub  = 3
-	opcode_sub  = 4
+	opcodeErr  = 0
+	opcodeInfo = 1
+	opcodeAuth = 2
+	opcodePub  = 3
+	opcodeSub  = 4
 )
 
 // Hpfeeds stores internal state for one hpfeeds connection. On disconnection,
@@ -52,6 +52,7 @@ type Hpfeeds struct {
 	Log bool
 }
 
+// NewHpfeeds returns a Hpfeeds instance
 func NewHpfeeds(host string, port int, ident string, auth string) Hpfeeds {
 	return Hpfeeds{
 		host:  host,
@@ -68,7 +69,7 @@ func NewHpfeeds(host string, port int, ident string, auth string) Hpfeeds {
 
 // Connect establishes a new hpfeeds connection and will block until the
 // connection is successfully estabilshed or the connection attempt failed.
-func (hp *Hpfeeds) Connect() error {
+func (hp *Hpfeeds) Connect() (err error) {
 	hp.clearDisconnected()
 
 	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", hp.host, hp.port))
@@ -76,12 +77,11 @@ func (hp *Hpfeeds) Connect() error {
 		return err
 	}
 
-	conn, err := net.DialTCP("tcp", &hp.LocalAddr, addr)
+	hp.conn, err = net.DialTCP("tcp", &hp.LocalAddr, addr)
 	if err != nil {
 		return err
 	}
 
-	hp.conn = conn
 	go hp.recvLoop()
 	<-hp.authSent
 
@@ -151,12 +151,12 @@ func (hp *Hpfeeds) recvLoop() {
 
 func (hp *Hpfeeds) parse(opcode uint8, data []byte) {
 	switch opcode {
-	case opcode_info:
+	case opcodeInfo:
 		hp.sendAuth(data[(1 + uint8(data[0])):])
 		hp.authSent <- true
-	case opcode_err:
+	case opcodeErr:
 		hp.log("Received error from server: %s\n", string(data))
-	case opcode_pub:
+	case opcodePub:
 		len1 := uint8(data[0])
 		name := string(data[1:(1 + len1)])
 		len2 := uint8(data[1+len1])
@@ -205,14 +205,14 @@ func (hp *Hpfeeds) sendAuth(nonce []byte) {
 	mac.Write([]byte(hp.auth))
 	writeField(buf, []byte(hp.ident))
 	buf.Write(mac.Sum(nil))
-	hp.sendRawMsg(opcode_auth, buf.Bytes())
+	hp.sendRawMsg(opcodeAuth, buf.Bytes())
 }
 
 func (hp *Hpfeeds) sendSub(channelName string) {
 	buf := new(bytes.Buffer)
 	writeField(buf, []byte(hp.ident))
 	buf.Write([]byte(channelName))
-	hp.sendRawMsg(opcode_sub, buf.Bytes())
+	hp.sendRawMsg(opcodeSub, buf.Bytes())
 }
 
 func (hp *Hpfeeds) sendPub(channelName string, payload []byte) {
@@ -220,7 +220,7 @@ func (hp *Hpfeeds) sendPub(channelName string, payload []byte) {
 	writeField(buf, []byte(hp.ident))
 	writeField(buf, []byte(channelName))
 	buf.Write(payload)
-	hp.sendRawMsg(opcode_pub, buf.Bytes())
+	hp.sendRawMsg(opcodePub, buf.Bytes())
 }
 
 // Subscribe sends a subscribe message to the hpfeeds server. All incoming
