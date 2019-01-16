@@ -10,7 +10,15 @@ import (
 func main() {
 
 	db := NewDB()
-	err := hpfeeds.ListenAndServe("test_broker", 10000, db)
+	b := &hpfeeds.Broker{
+		Name: "test_brkoer",
+		Port: 10000,
+		DB:   db,
+	}
+	b.SetDebugLogger(log.Print)
+	b.SetInfoLogger(log.Print)
+	b.SetErrorLogger(log.Print)
+	err := b.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
 	}

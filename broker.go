@@ -38,9 +38,9 @@ type Broker struct {
 	clientCount int
 	countMutex  sync.RWMutex
 
-	debugLog Logger
-	errorLog Logger
-	infoLog  Logger
+	debugLogger Logger
+	errorLogger Logger
+	infoLogger  Logger
 }
 
 // ListenAndServe uses a default broker and starts serving.
@@ -54,9 +54,9 @@ func ListenAndServe(name string, port int, db Identifier) error {
 func (b *Broker) ListenAndServe() error {
 	// TODO: Create a debug log function to call to pretty print this.
 	b.logDebug("ListenAndServe with Broker:\n")
-	b.logDebug("\tb.Name: %s\n", b.Name)
-	b.logDebug("\tb.Port: %s\n", b.Port)
-	b.logDebug("\tb.DB: %v\n", b.DB)
+	b.logDebugf("\tb.Name: %s\n", b.Name)
+	b.logDebugf("\tb.Port: %d\n", b.Port)
+	b.logDebugf("\tb.DB: %#v\n", b.DB)
 
 	if b.DB == nil {
 		return ErrNilDB
@@ -81,7 +81,7 @@ func (b *Broker) serve(ln *net.TCPListener) error {
 		}
 		s := NewSession(conn.(*net.TCPConn))
 		//TODO: Let's print the IP of the connection here. Maybe other useful info instead of just a ptr to the Conn.
-		b.logDebug("New session: %v\n", s)
+		b.logDebugf("New session: %v\n", s)
 		go b.serveSession(s) // Kick off the session and keep listening.
 	}
 }
@@ -96,7 +96,7 @@ func (b *Broker) sendInfoRequest(s *Session) error {
 	}
 
 	buf := new(bytes.Buffer)
-	b.logDebug("Generated nonce: %x\n", s.Nonce)
+	b.logDebugf("Generated nonce: %x\n", s.Nonce)
 	writeField(buf, []byte(b.Name))
 	buf.Write(s.Nonce)
 	s.sendRawMessage(OpInfo, buf.Bytes())
@@ -131,7 +131,7 @@ func (b *Broker) recvLoop(s *Session) {
 
 		n, err := s.Conn.Read(readbuf)
 		if err != nil {
-			b.logDebug("Read(): %s\n", err)
+			b.logDebugf("Read(): %s\n", err)
 			return
 		}
 
@@ -153,12 +153,12 @@ func (b *Broker) recvLoop(s *Session) {
 }
 
 func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
-	b.logDebug("Parse opcode: %d\n", opcode)
+	b.logDebugf("Parse opcode: %d\n", opcode)
 	switch opcode {
 	case OpErr:
-		b.logError("Received error from client: %s\n", string(data))
+		b.logErrorf("Received error from client: %s\n", string(data))
 	case OpInfo: // Unexpected if received server side.
-		b.logError("Received OpInfo from client: %s\n", string(data))
+		b.logErrorf("Received OpInfo from client: %s\n", string(data))
 	case OpAuth:
 		err := b.parseAuth(s, data)
 		if err != nil {
@@ -197,15 +197,15 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 		b.handleSub(s, name, channel)
 
 	default:
-		b.logError("Received message with unknown type %d\n", opcode)
+		b.logErrorf("Received message with unknown type %d\n", opcode)
 	}
 }
 
 func (b *Broker) handleSub(s *Session, name, channel string) {
 	b.logDebug("handleSub")
-	b.logDebug("\tAuthenticated? %b\n", s.Authenticated)
-	b.logDebug("\tName: %s\n", name)
-	b.logDebug("\tChannel: %s\n", channel)
+	b.logDebugf("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebugf("\tName: %s\n", name)
+	b.logDebugf("\tChannel: %s\n", channel)
 	if !s.Authenticated {
 		s.sendAuthErr()
 		return
@@ -213,7 +213,7 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 	id := s.Identity
 	subs := id.SubChannels
 
-	b.logDebug("%v: %v", channel, subs)
+	b.logDebugf("%v: %v", channel, subs)
 	if stringInSlice(channel, subs) {
 		b.subMutex.Lock()
 		b.subscribers[channel] = append(b.subscribers[channel], s)
@@ -227,10 +227,10 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 
 func (b *Broker) handlePub(s *Session, name string, channel string, payload []byte) {
 	b.logDebug("handlePub")
-	b.logDebug("\tAuthenticated? %b\n", s.Authenticated)
-	b.logDebug("\tName: %s\n", name)
-	b.logDebug("\tChannel: %s\n", channel)
-	b.logDebug("\tPayload: %x\n", payload)
+	b.logDebugf("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebugf("\tName: %s\n", name)
+	b.logDebugf("\tChannel: %s\n", channel)
+	b.logDebugf("\tPayload: %x\n", payload)
 	if !s.Authenticated {
 		s.sendAuthErr()
 		return
@@ -255,19 +255,24 @@ func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
 	b.subMutex.RLock()
 	sessions := b.subscribers[channel]
 
+	prune := false
+
 	for _, s := range sessions {
 		err := s.sendRawMessage(OpPublish, buf.Bytes())
 		if err != nil {
-			s.Close() // Close this session as we got an error. Not worth recovering.
-			b.logError("%s\n", err.Error())
-			defer b.pruneSessions(channel)
+			b.logErrorf("%s\n", err.Error())
+			prune = true
 		}
 	}
 	b.subMutex.RUnlock()
+	if prune {
+		b.pruneSessions(channel)
+	}
 }
 
 // Remove any closed Sessions.
 func (b *Broker) pruneSessions(channel string) {
+	b.logDebug("Pruning sessions")
 	b.subMutex.Lock()
 	defer b.subMutex.Unlock()
 

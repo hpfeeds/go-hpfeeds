@@ -7,52 +7,52 @@ import (
 type Logger func(...interface{})
 
 func (b *Broker) SetDebugLogger(logger Logger) {
-	b.debugLog = logger
+	b.debugLogger = logger
 }
 
 func (b *Broker) logDebug(args ...interface{}) {
-	if b.debugLog != nil {
-		b.debugLog(args)
+	if b.debugLogger != nil {
+		b.debugLogger(args)
 	}
 }
 
 func (b *Broker) logDebugf(format string, args ...interface{}) {
-	if b.infoLog != nil {
+	if b.infoLogger != nil {
 		out := fmt.Sprintf(format, args)
-		b.infoLog(out)
+		b.infoLogger(out)
 	}
 }
 
 func (b *Broker) SetErrorLogger(logger Logger) {
-	b.errorLog = logger
+	b.errorLogger = logger
 }
 
 func (b *Broker) logError(args ...interface{}) {
-	if b.errorLog != nil {
-		b.errorLog(args)
+	if b.errorLogger != nil {
+		b.errorLogger(args)
 	}
 }
 
 func (b *Broker) logErrorf(format string, args ...interface{}) {
-	if b.infoLog != nil {
+	if b.infoLogger != nil {
 		out := fmt.Sprintf(format, args)
-		b.infoLog(out)
+		b.infoLogger(out)
 	}
 }
 
 func (b *Broker) SetInfoLogger(logger Logger) {
-	b.infoLog = logger
+	b.infoLogger = logger
 }
 
 func (b *Broker) logInfo(args ...interface{}) {
-	if b.infoLog != nil {
-		b.infoLog(args)
+	if b.infoLogger != nil {
+		b.infoLogger(args)
 	}
 }
 
 func (b *Broker) logInfof(format string, args ...interface{}) {
-	if b.infoLog != nil {
+	if b.infoLogger != nil {
 		out := fmt.Sprintf(format, args)
-		b.infoLog(out)
+		b.infoLogger(out)
 	}
 }

@@ -25,11 +25,11 @@ func NewSession(conn *net.TCPConn) *Session {
 // Close will close the connection and set Conn to nil. This is a thread safe function.
 func (s *Session) Close() {
 	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
 	if s.Conn != nil {
 		s.Conn.Close()
 		s.Conn = nil
 	}
-	s.connMutex.Unlock()
 }
 
 func (s *Session) sendAuthErr() {
