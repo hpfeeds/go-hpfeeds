@@ -19,4 +19,3 @@ TODO
 ----
 * Test if everything actually works as intended, maybe write some unit tests 
 * Implement wrapper for JSON channels
-* Add some sanity checks for message field length values, in case server sends incorrect stuff
