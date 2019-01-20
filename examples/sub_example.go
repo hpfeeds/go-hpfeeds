@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/d1str0/go-hpfeeds"
 )
@@ -24,17 +26,27 @@ func main() {
 
 	hp := hpfeeds.NewClient(host, port, ident, auth)
 	hp.Log = true
-	hp.Connect()
 
-	// Subscribe to "flotest" and print everything coming in on it
-	channel2 := make(chan hpfeeds.Message)
-	hp.Subscribe(channel, channel2)
+	msgs := make(chan hpfeeds.Message)
 	go func() {
-		for foo := range channel2 {
-			fmt.Println(string(foo.Payload))
+		for foo := range msgs {
+			fmt.Println(foo.Name, string(foo.Payload))
 		}
 	}()
 
-	// Wait for disconnect
-	<-hp.Disconnected
+	for {
+		fmt.Println("Connecting to hpfeeds server.")
+		err := hp.Connect()
+		if err != nil {
+			log.Fatal("Error connecting to broker server.")
+		}
+
+		// Subscribe to "flotest" and print everything coming in on it
+		hp.Subscribe("test_channel", msgs)
+
+		// Wait for disconnect
+		<-hp.Disconnected
+		fmt.Println("Disconnected, attemting reconnect in 10 seconds...")
+		time.Sleep(10 * time.Second)
+	}
 }
