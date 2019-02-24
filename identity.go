@@ -11,7 +11,7 @@ type Identifier interface {
 // Identity will be created for each connection to allow for authentication and
 // easy pub/sub checks.
 type Identity struct {
-	Ident  string
+	Ident  string // TODO: Rename to "Name"
 	Secret string
 
 	SubChannels []string
