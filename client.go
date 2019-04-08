@@ -155,7 +155,7 @@ func (c *Client) parse(opcode uint8, data []byte) {
 		name := string(data[1:(1 + len1)])
 		len2 := uint8(data[1+len1])
 		channel := string(data[(1 + len1 + 1):(1 + len1 + 1 + len2)])
-		payload := data[1+len1+1+len2+1:]
+		payload := data[1+len1+1+len2:]
 		c.handlePub(name, channel, payload)
 	default:
 		c.log("Received message with unknown type %d\n", opcode)
