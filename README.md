@@ -1,4 +1,4 @@
-go-hpfeeds
+hpfeeds
 ==========
 
 Basic Go client implementation of [hpfeeds](https://github.com/rep/hpfeeds), a simplistic
