@@ -203,7 +203,7 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 
 func (b *Broker) handleSub(s *Session, name, channel string) {
 	b.logDebug("handleSub")
-	b.logDebugf("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebugf("\tAuthenticated? %t\n", s.Authenticated)
 	b.logDebugf("\tName: %s\n", name)
 	b.logDebugf("\tChannel: %s\n", channel)
 	if !s.Authenticated {
@@ -227,7 +227,7 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 
 func (b *Broker) handlePub(s *Session, name string, channel string, payload []byte) {
 	b.logDebug("handlePub")
-	b.logDebugf("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebugf("\tAuthenticated? %t\n", s.Authenticated)
 	b.logDebugf("\tName: %s\n", name)
 	b.logDebugf("\tChannel: %s\n", channel)
 	b.logDebugf("\tPayload: %x\n", payload)
