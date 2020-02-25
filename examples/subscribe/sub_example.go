@@ -42,7 +42,7 @@ func main() {
 		}
 
 		// Subscribe to "flotest" and print everything coming in on it
-		hp.Subscribe("test_channel", msgs)
+		hp.Subscribe(channel, msgs)
 
 		// Wait for disconnect
 		<-hp.Disconnected

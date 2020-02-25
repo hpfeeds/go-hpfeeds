@@ -203,7 +203,7 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 
 func (b *Broker) handleSub(s *Session, name, channel string) {
 	b.logDebug("handleSub")
-	b.logDebugf("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebugf("\tAuthenticated? %t\n", s.Authenticated)
 	b.logDebugf("\tName: %s\n", name)
 	b.logDebugf("\tChannel: %s\n", channel)
 	if !s.Authenticated {
@@ -227,10 +227,10 @@ func (b *Broker) handleSub(s *Session, name, channel string) {
 
 func (b *Broker) handlePub(s *Session, name string, channel string, payload []byte) {
 	b.logDebug("handlePub")
-	b.logDebugf("\tAuthenticated? %b\n", s.Authenticated)
+	b.logDebugf("\tAuthenticated? %t\n", s.Authenticated)
 	b.logDebugf("\tName: %s\n", name)
 	b.logDebugf("\tChannel: %s\n", channel)
-	b.logDebugf("\tPayload: %x\n", payload)
+	b.logDebugf("\tPayload: %s\n", string(payload))
 	if !s.Authenticated {
 		s.sendAuthErr()
 		return
@@ -247,10 +247,14 @@ func (b *Broker) handlePub(s *Session, name string, channel string, payload []by
 }
 
 func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
+	b.logInfof("sendToChannel\n")
 	buf := new(bytes.Buffer)
+	// Write length of name of sender, and then sender
 	writeField(buf, []byte(name))
+	// Write length of name of channel, then channel
 	writeField(buf, []byte(channel))
-	writeField(buf, payload)
+	// Write payload without first putting length
+	buf.Write(payload)
 
 	b.subMutex.RLock()
 	sessions := b.subscribers[channel]
@@ -258,6 +262,7 @@ func (b *Broker) sendToChannel(name string, channel string, payload []byte) {
 	prune := false
 
 	for _, s := range sessions {
+		b.logInfof("Sending Message: %s\n", string(buf.Bytes()))
 		err := s.sendRawMessage(OpPublish, buf.Bytes())
 		if err != nil {
 			b.logErrorf("%s\n", err.Error())

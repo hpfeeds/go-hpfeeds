@@ -12,13 +12,13 @@ func (b *Broker) SetDebugLogger(logger Logger) {
 
 func (b *Broker) logDebug(args ...interface{}) {
 	if b.debugLogger != nil {
-		b.debugLogger(args)
+		b.debugLogger(args...)
 	}
 }
 
 func (b *Broker) logDebugf(format string, args ...interface{}) {
 	if b.infoLogger != nil {
-		out := fmt.Sprintf(format, args)
+		out := fmt.Sprintf(format, args...)
 		b.infoLogger(out)
 	}
 }
@@ -29,13 +29,13 @@ func (b *Broker) SetErrorLogger(logger Logger) {
 
 func (b *Broker) logError(args ...interface{}) {
 	if b.errorLogger != nil {
-		b.errorLogger(args)
+		b.errorLogger(args...)
 	}
 }
 
 func (b *Broker) logErrorf(format string, args ...interface{}) {
 	if b.infoLogger != nil {
-		out := fmt.Sprintf(format, args)
+		out := fmt.Sprintf(format, args...)
 		b.infoLogger(out)
 	}
 }
@@ -46,13 +46,13 @@ func (b *Broker) SetInfoLogger(logger Logger) {
 
 func (b *Broker) logInfo(args ...interface{}) {
 	if b.infoLogger != nil {
-		b.infoLogger(args)
+		b.infoLogger(args...)
 	}
 }
 
 func (b *Broker) logInfof(format string, args ...interface{}) {
 	if b.infoLogger != nil {
-		out := fmt.Sprintf(format, args)
+		out := fmt.Sprintf(format, args...)
 		b.infoLogger(out)
 	}
 }
