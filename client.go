@@ -151,9 +151,25 @@ func (c *Client) parse(opcode uint8, data []byte) {
 	case OpErr:
 		c.log("Received error from server: %s\n", string(data))
 	case OpPublish:
+		flen := len(data)
+		if flen == 0 {
+			c.log("Invalid packet length. Data size is 0")
+			return
+		}
 		len1 := uint8(data[0])
+
+		if int(1+len1) > flen {
+			c.log("Invalid packet length for len of name")
+			return
+		}
 		name := string(data[1:(1 + len1)])
 		len2 := uint8(data[1+len1])
+
+		// Expect payload of at least 1, hence +1 at end.
+		if int(1+len1+1+len2+1) > flen {
+			c.log("Invalid packet length for data provided")
+			return
+		}
 		channel := string(data[(1 + len1 + 1):(1 + len1 + 1 + len2)])
 		payload := data[1+len1+1+len2:]
 		c.handlePub(name, channel, payload)
