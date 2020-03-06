@@ -168,6 +168,11 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 		}
 	case OpPublish:
 		flen := len(data)
+		if flen == 0 {
+			b.logError("Invalid length on packet.")
+			return
+		}
+
 		len1 := uint8(data[0])
 		// Make sure supplied length isn't actually overbounds.
 		if int(1+len1) > flen {
@@ -177,7 +182,8 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 		name := string(data[1:(1 + len1)])
 
 		len2 := uint8(data[1+len1])
-		if int(1+len1+1+len2) > flen {
+		// Expect at least 1 byte for payload, hence +1 at end.
+		if int(1+len1+1+len2+1) > flen {
 			b.logError("Invalid length on packet.")
 			return
 		}
@@ -188,7 +194,9 @@ func (b *Broker) parse(s *Session, opcode uint8, data []byte) {
 	case OpSubscribe:
 		flen := len(data)
 		len1 := uint8(data[0])
-		if int(1+len1) > flen {
+
+		// Expect at least 1 byte for channel, hence +1 at end.
+		if int(1+len1+1) > flen {
 			b.logError("Invalid length on packet.")
 			return
 		}
@@ -292,8 +300,12 @@ func (b *Broker) pruneSessions(channel string) {
 
 // Parse an auth request.
 func (b *Broker) parseAuth(s *Session, data []byte) error {
+	if len(data) == 0 {
+		return ErrInvalidPacket
+	}
 	flen := uint8(data[0])
-	if int(flen+1) > len(data) {
+	// Expect at hash of at least 1 byte len, hence +1 at end.
+	if int(1+flen+1) > len(data) {
 		return ErrInvalidPacket
 	}
 

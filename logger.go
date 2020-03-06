@@ -4,8 +4,10 @@ import (
 	"fmt"
 )
 
+// Logger is a function that will take a Printf style input string and argument
 type Logger func(...interface{})
 
+// SetDebugLogger sets the broker's logger output for Debug level logs
 func (b *Broker) SetDebugLogger(logger Logger) {
 	b.debugLogger = logger
 }
@@ -23,6 +25,7 @@ func (b *Broker) logDebugf(format string, args ...interface{}) {
 	}
 }
 
+// SetErrorLogger sets the broker's logger output for Error level logs
 func (b *Broker) SetErrorLogger(logger Logger) {
 	b.errorLogger = logger
 }
@@ -40,6 +43,7 @@ func (b *Broker) logErrorf(format string, args ...interface{}) {
 	}
 }
 
+// SetInfoLogger sets the broker's logger output for Info level logs
 func (b *Broker) SetInfoLogger(logger Logger) {
 	b.infoLogger = logger
 }

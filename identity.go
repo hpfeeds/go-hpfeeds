@@ -1,6 +1,6 @@
 package hpfeeds
 
-// Authenticator is an interface to abstract possible storage mechanisms for
+// Identifier is an interface to abstract possible storage mechanisms for
 // Auth credentials. Possibilities include MongoDB, BoltDB, or flat config
 // files.
 type Identifier interface {
